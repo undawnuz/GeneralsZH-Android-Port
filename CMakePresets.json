@@ -325,6 +325,45 @@
             "environment": {
                 "PKG_CONFIG_PATH": ""
             }
+        },
+        {
+            "name": "android-vulkan-generals",
+            "displayName": "Android (Vulkan) arm64-v8a - base Generals",
+            "inherits": "default-vcpkg",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "description": "Base Generals (not Zero Hour) for Android. Experimental.",
+            "cacheVariables": {
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "VCPKG_TARGET_TRIPLET": "arm64-android",
+                "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/cmake/triplets",
+                "VCPKG_OVERLAY_PORTS": "${sourceDir}/cmake/vcpkg-ports",
+                "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "$env{ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake",
+                "ANDROID_ABI": "arm64-v8a",
+                "ANDROID_PLATFORM": "android-28",
+                "ANDROID_STL": "c++_shared",
+                "CMAKE_POSITION_INDEPENDENT_CODE": "ON",
+                "SAGE_USE_DX8": "OFF",
+                "SAGE_USE_SDL3": "ON",
+                "SAGE_USE_OPENAL": "ON",
+                "SAGE_USE_GLM": "ON",
+                "SAGE_USE_MOLTENVK": "OFF",
+                "SAGE_DXVK_USE_LOCAL_FORK": "ON",
+                "SAGE_UPDATE_CHECK": "OFF",
+                "RTS_CRASHDUMP_ENABLE": "OFF",
+                "RTS_BUILD_OPTION_FFMPEG": "ON",
+                "RTS_BUILD_OPTION_SAGE_PATCH": "OFF",
+                "RTS_BUILD_GENERALS": "ON",
+                "RTS_BUILD_CORE_TOOLS": "OFF",
+                "RTS_BUILD_ZEROHOUR_TOOLS": "OFF",
+                "RTS_BUILD_ZEROHOUR_EXTRAS": "OFF",
+                "RTS_GAMEMEMORY_ENABLE": "OFF",
+                "RTS_BUILD_ZEROHOUR": "OFF"
+            },
+            "environment": {
+                "PKG_CONFIG_PATH": ""
+            }
         }
     ],
     "buildPresets": [
