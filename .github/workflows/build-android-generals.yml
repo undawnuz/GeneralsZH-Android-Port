@@ -52,6 +52,14 @@ jobs:
           fetch-depth: 0
           submodules: false
 
+      - name: Apply overlay patches (overlay-*.zip in repo root)
+        run: |
+          shopt -s nullglob
+          for z in overlay-*.zip; do
+            echo "Applying $z"
+            unzip -o -q "$z"
+          done
+
       - name: Checkout DXVK fork submodule
         run: |
           set -euo pipefail
