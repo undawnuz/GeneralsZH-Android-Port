@@ -20,7 +20,7 @@ on:
 
 jobs:
   build-android:
-    name: generals-compile-check
+    name: generals-apk
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
@@ -263,6 +263,104 @@ jobs:
           cmake --build build/${{ env.PRESET }} --target g_generals dxvk_d3d8_install \
             main_hook file_redirect_hook gsl_alloc_hook hook_impl -- -k 0 2>&1 | tee logs/build_android.log
           ccache --show-stats
+
+      # Base Generals build dir -> the path the packaging script expects.
+      - name: Point packaging script at the base-game build
+        run: |
+          set -e
+          test -d build/android-vulkan-generals
+          ln -sfn android-vulkan-generals build/android-vulkan
+          find build/android-vulkan-generals -name libmain.so -not -path "*/_deps/*" -exec ls -la {} \;
+
+      - name: Strip debug symbols
+        run: |
+          STRIP="$(ls "${ANDROID_NDK_HOME}"/toolchains/llvm/prebuilt/*/bin/llvm-strip | head -1)"
+          for lib in "build/${{ env.PRESET }}/Generals/Code/Main/libmain.so" \
+                     "build/${{ env.PRESET }}/_deps/sdl3-build/libSDL3.so" \
+                     "build/${{ env.PRESET }}/_deps/sdl3_image-build/libSDL3_image.so" \
+                     "build/${{ env.PRESET }}/_deps/openal_soft-build/libopenal.so" \
+                     "build/${{ env.PRESET }}/libgamespy.so" \
+                     "build/${{ env.PRESET }}/_deps/adrenotools-build/libadrenotools.so" \
+                     "build/${{ env.PRESET }}/_deps/adrenotools-build/src/hook/libgsl_alloc_hook.so" \
+                     "build/${{ env.PRESET }}/_deps/adrenotools-build/src/hook/libhook_impl.so" \
+                     "build/${{ env.PRESET }}/_deps/adrenotools-build/src/hook/libmain_hook.so" \
+                     "build/${{ env.PRESET }}/_deps/adrenotools-build/src/hook/libfile_redirect_hook.so"; do
+            [ -f "$lib" ] && "$STRIP" --strip-unneeded "$lib"
+          done
+      - name: Set artifact version
+        id: artifact
+        run: |
+          # GeneralsX @feature Android port 08/07/2026 Version numbers are
+          # manually managed (android/app/build.gradle), not auto-bumped from
+          # the workflow run number anymore. A manual "Run workflow" dispatch
+          # can still override them for a one-off build via the version_name /
+          # version_code inputs above; a normal push build passes neither, so
+          # Gradle falls back to whatever is committed in build.gradle.
+          echo "version_code=" >> "$GITHUB_OUTPUT"
+          echo "version_name=" >> "$GITHUB_OUTPUT"
+          echo "apk_name=GeneralsXClassic-android-run${{ github.run_number }}.apk" >> "$GITHUB_OUTPUT"
+      - name: Package APK
+        env:
+          # scripts/build/android/package-android-zh.sh uses these to stage
+          # jniLibs/, the SDL3 Java glue, and fonts, then invokes Gradle. Same
+          # fixed debug.keystore every run (committed in android/app/) is what
+          # makes consecutive CI builds installable as updates over each other
+          # rather than requiring an uninstall, PROVIDED versionCode was bumped
+          # by hand (in build.gradle or via a manual-dispatch override) since
+          # the last build the user actually installed.
+          GX_ANDROID_STAGING: ${{ github.workspace }}/android-staging
+          GX_ANDROID_VERSION_CODE: ${{ steps.artifact.outputs.version_code }}
+          GX_ANDROID_VERSION_NAME: ${{ steps.artifact.outputs.version_name }}
+        run: |
+          ./scripts/build/android/package-android-zh.sh
+      - name: Locate APK
+        id: locate
+        run: |
+          APK="android/app/build/outputs/apk/debug/app-debug.apk"
+          if [ ! -f "$APK" ]; then echo "::error::APK not found at $APK"; exit 1; fi
+          cp "$APK" "${{ steps.artifact.outputs.apk_name }}"
+          echo "path=${{ steps.artifact.outputs.apk_name }}" >> "$GITHUB_OUTPUT"
+      - name: Verify APK contains every library libmain.so needs
+        run: |
+          set -euo pipefail
+          READELF="$(ls "${ANDROID_NDK_HOME}"/toolchains/llvm/prebuilt/*/bin/llvm-readelf | head -1)"
+          APK="${{ steps.locate.outputs.path }}"
+          WORKDIR="$(mktemp -d)"
+          unzip -q "${APK}" 'lib/arm64-v8a/*' -d "${WORKDIR}"
+          echo "Packaged libraries:"
+          ls "${WORKDIR}/lib/arm64-v8a/"
+          NEEDED="$("${READELF}" -d "${WORKDIR}/lib/arm64-v8a/libmain.so" | grep NEEDED | sed -E 's/.*\[(.*)\]/\1/')"
+          missing=0
+          for lib in ${NEEDED}; do
+            case "${lib}" in
+              libc.so|libm.so|libdl.so|liblog.so|libandroid.so|libGLESv*|libEGL.so|libvulkan.so|libOpenSLES.so|libaaudio.so|libmediandk.so|libcamera2ndk.so|libjnigraphics.so|libnativewindow.so|libsync.so|libz.so)
+                continue ;;  # system libs every device provides via the NDK stable ABI (run
+                             # #11 caught libmediandk.so, pulled in by FFmpeg's MediaCodec
+                             # backend, missing from this allowlist — see docs/port/ANDROID_PORT.md)
+            esac
+            if [ ! -f "${WORKDIR}/lib/arm64-v8a/${lib}" ]; then
+              echo "::error::libmain.so needs '${lib}' at runtime but it is not packaged in the APK"
+              missing=1
+            fi
+          done
+          rm -rf "${WORKDIR}"
+          if [ "${missing}" -ne 0 ]; then
+            echo "::error::APK is missing required native libraries — it would crash with dlopen failed on any real device."
+            exit 1
+          fi
+          echo "OK: every DT_NEEDED of libmain.so is present in the APK."
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.artifact.outputs.apk_name }}
+          path: ${{ steps.locate.outputs.path }}
+          # GeneralsX @bugfix Android CI 18/07/2026 was 30: the free plan's
+          # Actions storage quota is 0.5 GB total and each APK is ~110 MB, so
+          # a single busy day of testing (this project pushes several builds
+          # an hour while chasing device-specific bugs) filled it to 90% on
+          # its own even with the "Delete old artifacts" cleanup step below.
+          # 7 days is still ample time for a tester to grab a build.
+          retention-days: 7
 
       - name: Collect dependency build logs for diagnosis
         if: always()
