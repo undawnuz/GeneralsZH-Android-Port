@@ -1,11 +1,16 @@
-add_executable(g_generals WIN32)
+if(ANDROID)
+    add_library(g_generals SHARED)
+else()
+    add_executable(g_generals WIN32)
+endif()
 
 # Use a binary name that doesn't conflict with original game.
 # GeneralsX @build BenderAI 15/02/2026 Linux branding update
 if("${CMAKE_SYSTEM}" MATCHES "Windows")
     set_target_properties(g_generals PROPERTIES OUTPUT_NAME "generalsv${RTS_BUILD_OUTPUT_SUFFIX}")
+elseif(ANDROID)
+    set_target_properties(g_generals PROPERTIES OUTPUT_NAME main)
 else()
-    # GeneralsX @build BenderAI 15/02/2026 Linux branding update
     set_target_properties(g_generals PROPERTIES OUTPUT_NAME GeneralsX)
 endif()
 
@@ -38,6 +43,15 @@ if(SAGE_USE_SDL3)
     target_link_libraries(g_generals PRIVATE sdl3lib)
 endif()
 
+if(ANDROID)
+    target_link_libraries(g_generals PRIVATE adrenotools)
+    target_link_libraries(g_generals PRIVATE d3d8gles)
+endif()
+
+if(NOT DEFINED ANDROID_CI_BUILD_NUMBER)
+    set(ANDROID_CI_BUILD_NUMBER 0)
+endif()
+
 # TODO Originally referred to build host and user, replace with git info perhaps?
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/GeneratedVersion.h
 "#pragma once
@@ -45,6 +59,7 @@ file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/GeneratedVersion.h
 #define VERSION_LOCALBUILDNUM 0
 #define VERSION_BUILDUSER \"\"
 #define VERSION_BUILDLOC \"\"
+#define ANDROID_CI_BUILD_NUMBER ${ANDROID_CI_BUILD_NUMBER}
 "
 )
 
@@ -86,7 +101,15 @@ target_sources(g_generals PRIVATE
     $<$<NOT:$<BOOL:${WIN32}>>:SDL3Main.cpp>
     # Linux stubs
     $<$<NOT:$<BOOL:${WIN32}>>:LinuxStubs.cpp>
+    $<$<BOOL:${ANDROID}>:AndroidCrashHandler.cpp>
+    $<$<NOT:$<BOOL:${MSVC}>>:ReferenceFloatMath.cpp>
 )
+
+if(NOT MSVC)
+    set_source_files_properties(ReferenceFloatMath.cpp PROPERTIES
+        COMPILE_OPTIONS "-fno-builtin"
+        SKIP_PRECOMPILE_HEADERS ON)
+endif()
 
 # RC files are optional for MinGW builds
 # Icon: LoadIcon() handles missing resource gracefully (uses default system icon)
@@ -109,4 +132,22 @@ endif()
 # This creates generalsv${RTS_BUILD_OUTPUT_SUFFIX}.exe.debug (similar to MSVC .pdb files)
 if(MINGW AND COMMAND add_debug_strip_target)
     add_debug_strip_target(g_generals)
+endif()
+
+if(ANDROID)
+    set(_gx_hide_alloc_map "${CMAKE_CURRENT_BINARY_DIR}/gx_hide_alloc.map")
+    file(WRITE "${_gx_hide_alloc_map}" [=[
+{
+  global:
+    *;
+  local:
+    _Znw*;
+    _Zna*;
+    _Zdl*;
+    _Zda*;
+};
+]=])
+    target_link_options(g_generals PRIVATE
+        "-Wl,--version-script,${_gx_hide_alloc_map}"
+    )
 endif()
