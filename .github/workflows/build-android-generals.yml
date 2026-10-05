@@ -265,12 +265,13 @@ jobs:
           ccache --show-stats
 
       # Base Generals build dir -> the path the packaging script expects.
+      # (A symlink does not work: the script's `find` does not follow it.)
       - name: Point packaging script at the base-game build
         run: |
           set -e
-          test -d build/android-vulkan-generals
-          ln -sfn android-vulkan-generals build/android-vulkan
-          find build/android-vulkan-generals -name libmain.so -not -path "*/_deps/*" -exec ls -la {} \;
+          test -f build/android-vulkan-generals/Generals/Code/Main/libmain.so
+          sed -i 's#^BUILD_DIR="${PROJECT_ROOT}/build/android-vulkan"#BUILD_DIR="${PROJECT_ROOT}/build/android-vulkan-generals"#' scripts/build/android/package-android-zh.sh
+          grep -n '^BUILD_DIR=' scripts/build/android/package-android-zh.sh
 
       - name: Strip debug symbols
         run: |
